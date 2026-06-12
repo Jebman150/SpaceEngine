@@ -1,0 +1,27 @@
+[[molecule]]
+name = "Water"
+formula = "H2O"
+id = 1
+components = [
+    { element = 1, ratio = 2},
+    { element = 8, ratio = 1}
+]
+color = "#0015ff"
+
+[[molecule]]
+name = "test"
+formula = "blob"
+id = 2
+components = [
+    { element = 8, ratio = 1}
+]
+color = "#ff0022"
+
+[[molecule]]
+name = "test2"
+formula = "blob2"
+id = 3
+components = [
+    { element = 26, ratio = 1}
+]
+color = "#15ff00"

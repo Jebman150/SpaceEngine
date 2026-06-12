@@ -1,0 +1,46 @@
+[[planet]]
+name = "Sun"
+position = [0.0, 0.0, 0.0]
+velocity = [0.0, 0.0, 0.0]
+mass = 10000
+fixed = true
+temperature = 6000
+emissivity = 1
+
+chemical_composition = {
+    components = [
+        {element = 1, ratio = 1.0}
+    ]
+}
+
+[[planet]]
+name = "Earth"
+position = [500.0, 0.0, 0.0]
+velocity = [0.0, 0.0, 100.0]
+mass = 100
+fixed = false
+temperature = 300
+emissivity = 0.3
+
+chemical_composition = {
+    components = [
+        {element = 1, ratio = 0.2},
+        {element = 8, ratio = 0.2},
+        {element = 26, ratio = 0.6}
+    ]
+}
+
+[[planet]]
+name = "Pluto"
+position = [2000.0, 0.0, 0.0]
+velocity = [0.0, 0.0, 50.0]
+mass = 10
+fixed = false
+temperature = 250
+emissivity = 0.3
+
+chemical_composition = {
+    components = [
+        {element = 26, ratio = 1.0}
+    ]
+}

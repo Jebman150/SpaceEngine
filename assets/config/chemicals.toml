@@ -1,0 +1,26 @@
+[[chemical]]
+name = "Hydrogen"
+symbol = "H"
+id = 1
+density = { gas = 0.09, liquid = 70, solid = 90}
+transition_temp = { boiling = 20.28, freezing = 14.01 }
+heat_capacity = 14.3
+color = "#EB34C6"
+
+[[chemical]]
+name = "Oxygen"
+symbol = "O"
+id = 8
+density = { gas = 1.429, liquid = 1141, solid = 1400}
+transition_temp = { boiling = 90.19, freezing = 54.36 }
+heat_capacity = 0.918
+color = "#2169CF"
+
+[[chemical]]
+name = "Iron"
+symbol = "Fe"
+id = 26
+density = { gas = 0.12, liquid = 7000, solid = 7874}
+transition_temp = { boiling = 3134, freezing = 1811 }
+heat_capacity = 0.449
+color = "#692F06"
