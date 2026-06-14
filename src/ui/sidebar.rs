@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::ui::sidebar_panels::{CelestialBodyInfo, CompositionBar, Resources};
+use crate::ui::sidebar_panels::{CelestialBodyInfo, CompositionBar, HeatMapDisplay, Resources};
 
 #[derive(Resource, Default, Debug)]
 pub struct SelectedBody(pub Option<Entity>);
@@ -69,6 +69,22 @@ pub fn spawn_sidebar(
                         },
                         BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
                         Resources
+                    ));
+                });
+            spawn_panel(
+                sidebar,
+                &font,
+                "Heat map",
+                |panel| {
+                    panel.spawn((
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Px(200.0),
+                            flex_direction: FlexDirection::Column,
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+                        HeatMapDisplay
                     ));
                 });
         });

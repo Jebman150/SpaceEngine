@@ -1,19 +1,17 @@
+pub mod mesh_generation;
+
 use std::{f32::consts::PI, fs};
 
-use bevy::{asset::RenderAssetUsages, math::{U64Vec3, ops::cbrt}, prelude::*, render::render_resource::{Extent3d, TextureDimension, TextureFormat}};
+use bevy::{asset::RenderAssetUsages, math::{U64Vec3, USizeVec2, ops::cbrt}, prelude::*, render::render_resource::{Extent3d, TextureDimension, TextureFormat}};
+use noisy_bevy::simplex_noise_2d_seeded;
 use serde::Deserialize;
 
 use crate::{
     resources::periodic_table::PeriodicTable, 
     world::{
         celestial::{
-            Celestial,
-            Velocity,
-            Mass,
-            Sun,
-            ThermalBody
-        }, 
-        chemistry::ChemicalComposition
+            Celestial, HeightMap, IntensityMap, Mass, Sun, ThermalBody, Velocity
+        }, chemistry::ChemicalComposition, generation::mesh_generation::MeshDescriptor, thermodynamics::HeatMap
     }
 };
 
@@ -98,18 +96,52 @@ pub fn spawn_planets(
     });
 
     for (id, planet_config) in config.planet.iter().enumerate() {
+        // Prerequisites:
+        let height_map = IntensityMap::generate(
+            "Height map".to_owned(),
+            USizeVec2{ x: 256, y: 256},
+            &mut images,
+            calc_height);
+
+        let heat_map = IntensityMap::generate(
+            "Heat map".to_owned(), 
+            USizeVec2{ x: 8, y: 8}, 
+            &mut images, 
+            |rel_pos: Vec2| {
+                let dist_from_equator = (0.5 - rel_pos.y).abs() * 2.0;
+                [
+                    (dist_from_equator * 255.0) as u8,
+                    ((1.0 - (dist_from_equator - 0.5).abs() * 2.0) * 255.0) as u8,
+                    ((1.0 - dist_from_equator) * 255.0) as u8,
+                    255,
+                ]
+        });
+
+        // Mesh generation:
         let volume = calc_volume(planet_config.mass, &planet_config.chemical_composition, &periodic_table);
         let radius = cbrt(3.0*volume / (4.0 * PI));
+        let mut mesh = mesh_generation::generate_mesh(
+            MeshDescriptor{
+                radius: radius,
+                subdivisions: 4,
+                ..default()
+            }, &height_map);
+        mesh.compute_normals();
+
+
+        
         let color = get_average_color(&planet_config.chemical_composition, &periodic_table);
         let heat_capacity = calc_heat_capacity(&planet_config.chemical_composition, &periodic_table);
 
-        let mesh = meshes.add(Sphere { radius: radius }.mesh().uv(32, 18));
+        let mesh_handle: Handle<Mesh> = meshes.add(mesh);
 
         let planet_material =
         if let Some(color) = color {
             materials.add(StandardMaterial {
                 base_color_texture: Some(images.add(colored_texture(color))),
                 unlit: false,
+                perceptual_roughness: 0.5,
+                metallic: 0.0,
                 ..default()
             })
         } else {
@@ -122,19 +154,16 @@ pub fn spawn_planets(
                 Celestial(planet_config.name.clone()),
                 Sun,
                 Transform::from_xyz(planet_config.position.x, planet_config.position.y, planet_config.position.z),
-                PointLight {
-                    intensity: planet_config.temperature,
-                    color: Color::WHITE,
-                    shadows_enabled: true,
-                    ..default()
-                },
 
                 Velocity {0: planet_config.velocity},
                 Mass (planet_config.mass),
                 ThermalBody { temperature: planet_config.temperature, heat_capacity: heat_capacity, emissivity: planet_config.emissivity},
 
+                HeatMap(heat_map),
+                HeightMap(height_map),
+
                 planet_config.chemical_composition.clone(),
-                Mesh3d(mesh),
+                Mesh3d(mesh_handle),
                 MeshMaterial3d(planet_material)
             ));
         } else {
@@ -145,13 +174,26 @@ pub fn spawn_planets(
                 Velocity {0: planet_config.velocity},
                 Mass (planet_config.mass),
                 ThermalBody { temperature: planet_config.temperature, heat_capacity: heat_capacity, emissivity: planet_config.emissivity},
+                
+                HeatMap(heat_map),
+                HeightMap(height_map),
 
                 planet_config.chemical_composition.clone(),
-                Mesh3d(mesh),
+                Mesh3d(mesh_handle),
                 MeshMaterial3d(planet_material)
             ));
         }
     }
+}
+
+fn calc_height(pos: Vec2) -> [u8; 4] {
+    let val = (simplex_noise_2d_seeded(pos * 10.0, 1.0) * 255.0) as u8;
+    [
+        val,
+        val,
+        val,
+        255
+    ]
 }
 
 /// Creates a colorful test pattern

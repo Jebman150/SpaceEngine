@@ -8,6 +8,7 @@ anyhow = "1.0.102"
 bevy = { version = "0.18.1", features = ["dynamic_linking"] }
 bevy_mod_picking = "0.20.1"
 hex_color = "3.0.0"
+noisy_bevy = "0.13.0"
 rand = "0.10.1"
 serde = "1.0.228"
 toml = "1.1.2"

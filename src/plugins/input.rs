@@ -23,7 +23,10 @@ impl Plugin for InputPlugin {
         app
         .add_systems(Update, (
             (
-                camera_control::zoom
+                camera_control::zoom,
+                camera_control::rotate,
+                camera_control::center_to_selected,
+                camera_control::update
             ).in_set(InputSystems::Mouse),
             (
                 selection::selected_body_change

@@ -2,12 +2,9 @@ use bevy::prelude::*;
 
 use crate::{
     resources::{molecule_table::MoleculeTable, periodic_table::PeriodicTable},
-    ui::{
-        camera_config::MainCamera,
-        sidebar::SelectedBody
-    },
+    ui::sidebar::SelectedBody,
     world::{
-        celestial::{Celestial, Mass, ThermalBody, Velocity},
+        celestial::{Celestial, HeightMap, Mass, ThermalBody, Velocity},
         chemistry::ChemicalComposition
     }
 };
@@ -17,26 +14,17 @@ pub struct CelestialBodyInfo;
 
 pub fn update_body_view(
     selected: Res<SelectedBody>,
-    bodies: Query<(&Transform, &Velocity, &Mass, &ThermalBody), (With<Celestial>, Without<MainCamera>)>,
-    mut cam: Query<(&mut Transform, &MainCamera), With<MainCamera>>,
+    bodies: Query<(&Celestial, &Velocity, &Mass, &ThermalBody), With<Celestial>>,
     mut ui_text: Query<&mut Text, With<CelestialBodyInfo>>
 ) {
     let Ok(mut text) = ui_text.single_mut() else { return; };
 
     if let Some(entity) = selected.0 {
-        if let Ok((position, _vel, mass, thermal_stats)) = bodies.get(entity) {
-            text.0 = format!("Mass: {:.2} kg\n Temp: {:.2} K", mass.0, thermal_stats.temperature);
-            
-            let Ok((mut camera_transform, camera)) = cam.single_mut() else { return; };
-            camera_transform.translation = position.translation + Vec3{x: camera.dist, y: camera.dist, z: camera.dist};
-            *camera_transform = camera_transform.looking_at(position.translation, Vec3::Y);
+        if let Ok((info, _vel, mass, thermal_stats)) = bodies.get(entity) {
+            text.0 = format!("Name: {}\nMass: {:.2} kg\nTemp: {:.2} K", info.0, mass.0, thermal_stats.temperature);
         } else {
             text.0 = format!("
                 -- Nothing selected --");
-            
-            let Ok((mut camera_transform, camera)) = cam.single_mut() else { return; };
-            camera_transform.translation = Vec3::ZERO + Vec3{x: camera.dist, y: camera.dist, z: camera.dist};
-            *camera_transform = camera_transform.looking_at(Vec3::ZERO, Vec3::Y);
         }
     }
 }
@@ -181,4 +169,46 @@ pub fn update_resources(
             });
         }
     }
+}
+
+#[derive(Component)]
+pub struct HeatMapDisplay;
+
+pub fn update_heat_map_display(
+    mut commands: Commands,
+    selected: Res<SelectedBody>,
+    heat_map_query: Query<&HeightMap>,
+    mut resource_panel: Query<Entity, With<HeatMapDisplay>>
+) {
+    if !selected.is_changed() {
+        return;
+    }
+
+    let Some(entity) = selected.0 else {
+        info!("No entity selected");
+        return;
+    };
+
+    let Ok(panel) = resource_panel.single_mut() else {
+        info!("No panel found for map");
+        return;
+    };
+
+    commands.entity(panel).despawn_related::<Children>();
+
+    let Ok(heat_map) = heat_map_query.get(entity) else {
+        info!("No data found for heat map");
+        return;
+    };
+
+    commands.entity(panel).with_child((
+        ImageNode::new(heat_map.0.handle.clone()),
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            ..default()
+        },
+    ));
+
+
 }
