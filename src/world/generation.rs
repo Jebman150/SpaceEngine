@@ -1,4 +1,5 @@
 pub mod mesh_generation;
+pub mod materials;
 
 use std::{f32::consts::PI, fs};
 
@@ -11,11 +12,9 @@ use crate::{
     world::{
         celestial::{
             Celestial, HeightMap, IntensityMap, Mass, Sun, ThermalBody, Velocity
-        }, chemistry::ChemicalComposition, generation::mesh_generation::MeshDescriptor, thermodynamics::HeatMap
+        }, chemistry::ChemicalComposition, generation::{materials::LineMaterial, mesh_generation::MeshDescriptor}, thermodynamics::HeatMap
     }
 };
-
-
 
 fn calc_volume(mass: f32, chemical_composition: &ChemicalComposition, periodic_table: &PeriodicTable) -> f32 {
     let mut total_volume: f32 = 0.0;
@@ -63,6 +62,7 @@ pub fn spawn_planets(
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut line_materials: ResMut<Assets<LineMaterial>>,
     periodic_table: Res<PeriodicTable>,
 ) {
     
@@ -95,6 +95,10 @@ pub fn spawn_planets(
         ..default()
     });
 
+    let line_material = line_materials.add(LineMaterial {
+        color: LinearRgba::GREEN,
+    });
+
     for (id, planet_config) in config.planet.iter().enumerate() {
         // Prerequisites:
         let height_map = IntensityMap::generate(
@@ -120,13 +124,13 @@ pub fn spawn_planets(
         // Mesh generation:
         let volume = calc_volume(planet_config.mass, &planet_config.chemical_composition, &periodic_table);
         let radius = cbrt(3.0*volume / (4.0 * PI));
-        let mut mesh = mesh_generation::generate_mesh(
+        let mesh = mesh_generation::generate_mesh(
             MeshDescriptor{
                 radius: radius,
                 subdivisions: 4,
                 ..default()
             }, &height_map);
-        mesh.compute_normals();
+        //mesh.compute_normals();
 
 
         
@@ -135,8 +139,8 @@ pub fn spawn_planets(
 
         let mesh_handle: Handle<Mesh> = meshes.add(mesh);
 
-        let planet_material =
-        if let Some(color) = color {
+        let planet_material = line_material.clone();
+        /*if let Some(color) = color {
             materials.add(StandardMaterial {
                 base_color_texture: Some(images.add(colored_texture(color))),
                 unlit: false,
@@ -147,7 +151,7 @@ pub fn spawn_planets(
         } else {
             warn!("Could not create material for planet {} - using debug material", id);
             debug_material.clone()
-        };
+        };*/
 
         if planet_config.fixed {
             commands.spawn((

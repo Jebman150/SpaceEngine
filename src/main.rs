@@ -22,7 +22,7 @@ pub mod resources;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins((DefaultPlugins, MaterialPlugin::<world::generation::materials::LineMaterial>::default()))
         .init_resource::<SelectedBody>()
         .init_resource::<PeriodicTable>()
         .init_resource::<MoleculeTable>()
