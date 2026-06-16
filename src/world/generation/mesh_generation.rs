@@ -3,10 +3,9 @@ mod vertices;
 use core::f32;
 use std::f32::consts::PI;
 
-use bevy::{asset::RenderAssetUsages, math::NormedVectorSpace, mesh::{Indices, PrimitiveTopology}, platform::collections::HashMap, prelude::*};
+use bevy::{asset::RenderAssetUsages, math::{NormedVectorSpace, ops::sqrt}, mesh::{Indices, PrimitiveTopology}, platform::collections::HashMap, prelude::*};
 use rand::seq::SliceRandom;
 
-use crate::world::celestial::IntensityMap;
 use vertices::*;
 
 #[derive(Clone, Debug)]
@@ -23,72 +22,250 @@ impl Default for RenderMode {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct MeshDescriptor {
-    pub radius: f32,
-    pub subdivisions: usize,
+pub struct RenderOptions {
+    pub scale: f32,
     pub mode: RenderMode,
 }
 
-pub fn generate_mesh(
-    mesh_descriptor: MeshDescriptor,
-    _height_map: &IntensityMap
-) -> Mesh {
-    let mut mesh_data = MeshData::default();
-    mesh_data.set_orientation(Vec3::Y, Vec3::X);
-    initialize_stalberg(2, &mut mesh_data);
-    combine_triangles_to_quads_randomly(&mut mesh_data);
-
-    mesh_data.subdivide_to_quads();
-    relax_vertices(&mut mesh_data);
-    mesh_data.scale(mesh_descriptor.radius);
-
-    /*
-    let ico_vertices = icosahedron_vertices().to_vec();
-    let mut ico_triangles = icosahedron_indices().to_vec();
-
-    let mut ico_vertices = VertexArray::new(ico_vertices);
-
-    subdivide_triangles(&mut ico_vertices, &mut ico_triangles);
-    for v in ico_vertices.ref_mut() {
-        v.pos = v.pos.normalize();
-        v.pos *= mesh_descriptor.radius;
-    }
-
-    let (_vertices, _triangles) = goldberg_dual_mesh(&ico_vertices, &ico_triangles);
-    */
-
-    let ((raw_vertices, raw_indices), index_mode) =
-    match mesh_descriptor.mode {
-        RenderMode::Flat => {(
-            mesh_data.to_raw_flat_shading(),
-            PrimitiveTopology::TriangleList
-        )}
-        RenderMode::Smooth => {(
-            mesh_data.to_raw_triangles(),
-            PrimitiveTopology::TriangleList
-        )}
-        RenderMode::Frame => {
-            (
-            mesh_data.to_raw_lines(),
-            PrimitiveTopology::LineList
-        )}
-    };
-    let usage = RenderAssetUsages::RENDER_WORLD;
-
-    Mesh::new(index_mode, usage)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, raw_vertices)
-        .with_inserted_indices(Indices::U32(raw_indices))
+#[derive(Clone, Debug)]
+pub struct PlanetTile<const N: usize> {
+    pub transform: Transform,
+    pub outer_polygon: vertices::Polygon<N>,
+    pub tile_mesh: MeshData,
 }
 
-fn initialize_stalberg(resolution: usize, mesh: &mut MeshData) {
+#[derive(Clone, Debug, Default)]
+pub struct PlanetMesh {
+    pub hex_faces: Vec<PlanetTile<6>>,
+    pub pent_faces: Vec<PlanetTile<5>>,
+    pub outer_frame: MeshData,
+    pub face_count: usize,
+}
+
+impl PlanetMesh {
+    pub fn get_single_face(&self, i: usize, rendering_options: &RenderOptions) -> Mesh {
+        let ((mut raw_vertices, raw_indices), index_mode) =
+        match rendering_options.mode {
+            RenderMode::Flat => {
+                if i < 12 {(
+                    self.pent_faces[i].tile_mesh.to_raw_flat_shading(),
+                    PrimitiveTopology::TriangleList
+                )} else {(
+                    self.hex_faces[i-12].tile_mesh.to_raw_flat_shading(),
+                    PrimitiveTopology::TriangleList
+                )}
+                }
+            RenderMode::Smooth => {
+                if i < 12 {(
+                    self.pent_faces[i].tile_mesh.to_raw_triangles(),
+                    PrimitiveTopology::TriangleList
+                )} else {(
+                    self.hex_faces[i-12].tile_mesh.to_raw_triangles(),
+                    PrimitiveTopology::TriangleList
+                )}
+                }
+            RenderMode::Frame => {
+                if i < 12 {(
+                    self.pent_faces[i].tile_mesh.to_raw_lines(),
+                    PrimitiveTopology::LineList
+                )} else {(
+                    self.hex_faces[i-12].tile_mesh.to_raw_lines(),
+                    PrimitiveTopology::LineList
+                )}
+                }
+        };
+        let usage = RenderAssetUsages::RENDER_WORLD;
+
+        if i < 12 {
+            let frame = self.pent_faces[i].outer_polygon;
+            let sample_vertices = frame.verts;
+            let mut origin = [Vec3::ZERO; 5];
+            for v in 0..5 {
+                origin[v] = self.pent_faces[i].tile_mesh.vertices.get(&VertexIndex(v)).pos;
+            }
+            let mut destination = [Vec3::ZERO; 5];
+            for v in 0..5 {
+                destination[v] = self.outer_frame.vertices.get(&sample_vertices[v]).pos * rendering_options.scale;
+            }
+
+            for v in &mut raw_vertices {
+                let mut p = Vec3 { x: v[0], y: v[1], z: v[2]};
+                barycentric_projection::<5>(&mut p, &origin, &destination);
+                *v = [p.x, p.y, p.z];
+            }
+        } else {
+            let frame = self.hex_faces[i-12].outer_polygon;
+            let sample_vertices = frame.verts;
+            let mut origin = [Vec3::ZERO; 6];
+            for v in 0..6 {
+                origin[v] = self.hex_faces[i-12].tile_mesh.vertices.get(&VertexIndex(v)).pos;
+            }
+            let mut destination = [Vec3::ZERO; 6];
+            for v in 0..6 {
+                destination[v] = self.outer_frame.vertices.get(&sample_vertices[v]).pos * rendering_options.scale;
+            }
+
+            for v in &mut raw_vertices {
+                let mut p = Vec3 { x: v[0], y: v[1], z: v[2]};
+                barycentric_projection::<6>(&mut p, &origin, &destination);
+                *v = [p.x, p.y, p.z];
+            }
+        }
+
+        Mesh::new(index_mode, usage)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, raw_vertices)
+            .with_inserted_indices(Indices::U32(raw_indices))
+    }
+
+    pub fn get_outer_grid(&self, rendering_options: &RenderOptions) -> Mesh {
+        let ((mut raw_vertices, raw_indices), index_mode) =
+        match rendering_options.mode {
+            RenderMode::Flat => {(
+                self.outer_frame.to_raw_flat_shading(),
+                PrimitiveTopology::TriangleList
+            )}
+            RenderMode::Smooth => {(
+                self.outer_frame.to_raw_triangles(),
+                PrimitiveTopology::TriangleList
+            )}
+            RenderMode::Frame => {
+                (
+                self.outer_frame.to_raw_lines(),
+                PrimitiveTopology::LineList
+            )}
+        };
+        let usage = RenderAssetUsages::RENDER_WORLD;
+
+        for v in &mut raw_vertices {
+            v[0] *= rendering_options.scale;
+            v[1] *= rendering_options.scale;
+            v[2] *= rendering_options.scale;
+        }
+
+        Mesh::new(index_mode, usage)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, raw_vertices)
+            .with_inserted_indices(Indices::U32(raw_indices))
+    }
+}
+
+pub fn generate_mesh(
+    resolution: usize
+) -> PlanetMesh {
+    // First, generate the goldberg polyhedron out of hexagons and 12 pentagons
+    let mut polyhedron = MeshData::default();
+    polyhedron.vertices = VertexArray::new(icosahedron_vertices().to_vec());
+    polyhedron.triangles = PolygonArray { data: icosahedron_indices().to_vec()};
+    polyhedron.subdivide_triangles();
+    polyhedron.subdivide_triangles();
+    goldberg_dual_mesh(&mut polyhedron);
+
+    // For each face in the polyhedron, generate a map tile
+    let mut planet_mesh = PlanetMesh::default();
+    planet_mesh.outer_frame = polyhedron.clone();
+    planet_mesh.outer_frame.reduce_to_lines();
+    planet_mesh.face_count = polyhedron.hex.count() + polyhedron.pents.count();
+    let mut work_done = 0;
+    info!("Generating planet...");
+    info!("Total faces: {}", planet_mesh.face_count);
+
+    while let Some(hex) = polyhedron.hex.data.pop() {
+        let v_origin = polyhedron.vertices.get(&hex.verts[1]);
+        let basis_1 = polyhedron.vertices.get(&hex.verts[0]).pos - v_origin.pos;
+        let basis_2 = polyhedron.vertices.get(&hex.verts[2]).pos - v_origin.pos;
+        let normal = basis_2.cross(basis_1);
+        let tangent = basis_2.cross(normal);
+
+        let mut vertices = Vec::new();
+        for idx in hex.verts {
+            vertices.push(polyhedron.vertices.get(&idx));
+        }
+        let offset = center_pos(&vertices).pos;
+
+        let transform = Transform::from_xyz(offset.x, offset.y, offset.z).looking_to(tangent, normal);
+        
+        let mut mesh_data = MeshData::default();
+        mesh_data.set_orientation(Vec3::Y, Vec3::X);
+        initialize_stalberg_hex(resolution, &mut mesh_data);
+        combine_triangles_to_quads_randomly(&mut mesh_data);
+
+        mesh_data.subdivide_to_quads();
+        relax_vertices(&mut mesh_data);
+        mesh_data.calc_lines_no_reduce();
+        mesh_data.reduce_to_triangles();
+
+        let planet_tile = PlanetTile::<6> {
+            outer_polygon: hex,
+            transform: transform,
+            tile_mesh: mesh_data
+        };
+        planet_mesh.hex_faces.push(planet_tile);
+        work_done += 1;
+        info!(" | Progress: {:.2}%", 100.0 * work_done as f32 / planet_mesh.face_count as f32)
+    }
+
+    while let Some(pent) = polyhedron.pents.data.pop() {
+        let v_origin = polyhedron.vertices.get(&pent.verts[1]);
+        let basis_1 = polyhedron.vertices.get(&pent.verts[0]).pos - v_origin.pos;
+        let basis_2 = polyhedron.vertices.get(&pent.verts[2]).pos - v_origin.pos;
+        let normal = basis_2.cross(basis_1);
+        let tangent = basis_2.cross(normal);
+
+        let mut vertices = Vec::new();
+        for idx in pent.verts {
+            vertices.push(polyhedron.vertices.get(&idx));
+        }
+        let offset = center_pos(&vertices).pos;
+
+        let mut transform = Transform::from_xyz(offset.x, offset.y, offset.z)
+            .looking_to(tangent, normal);
+        transform.rotate_local_y(-PI/2.0);
+        
+        let mut mesh_data = MeshData::default();
+        mesh_data.set_orientation(Vec3::Y, Vec3::X);
+        initialize_stalberg_pent(resolution, &mut mesh_data);
+        combine_triangles_to_quads_randomly(&mut mesh_data);
+
+        mesh_data.subdivide_to_quads();
+        relax_vertices(&mut mesh_data);
+        mesh_data.calc_lines_no_reduce();
+        mesh_data.reduce_to_triangles();
+
+        let planet_tile = PlanetTile::<5> {
+            outer_polygon: pent,
+            transform: transform,
+            tile_mesh: mesh_data
+        };
+        planet_mesh.pent_faces.push(planet_tile);
+        work_done += 1;
+        info!(" | Progress: {:.2}%", 100.0 * work_done as f32 / planet_mesh.face_count as f32)
+    }
+    planet_mesh
+}
+
+fn initialize_stalberg_hex(resolution: usize, mesh: &mut MeshData) {
     let mut verts = [VertexIndex::default(); 6];
     for i in 0..6 {
-        let pos = mesh.tangent.rotate_axis(mesh.normal, i as f32 * PI/3.0);
+        let pos = mesh.tangent.rotate_axis(mesh.normal, i as f32 * (2.0 * PI) / 6.0).normalize();
         let idx = mesh.vertices.add(Vertex { pos });
         mesh.boundary_indices.push(idx);
         verts[i] = idx;
     }
     mesh.hex.add(Hexagon { verts });
+    mesh.reduce_to_triangles();
+    for _ in 0..resolution {
+        mesh.subdivide_triangles();
+    }
+}
+
+fn initialize_stalberg_pent(resolution: usize, mesh: &mut MeshData) {
+    let mut verts = [VertexIndex::default(); 5];
+    for i in 0..5 {
+        let pos = mesh.tangent.rotate_axis(mesh.normal, i as f32 * (2.0 * PI) / 5.0);
+        let idx = mesh.vertices.add(Vertex { pos });
+        mesh.boundary_indices.push(idx);
+        verts[i] = idx;
+    }
+    mesh.pents.add(Pentagon { verts });
     mesh.reduce_to_triangles();
     for _ in 0..resolution {
         mesh.subdivide_triangles();
@@ -168,7 +345,7 @@ fn combine_triangles_to_quads_randomly(mesh: &mut MeshData) {
 fn relax_vertices(mesh: &mut MeshData) {
     let neighbour_map = mesh.generate_neighbour_map();
     let boundary_indices = &mesh.boundary_indices;
-    let tolerance = 0.0001;
+    let tolerance = 0.001;
     let relaxation_factor = 0.1;
     let mut max_change = tolerance + 1.0;
     let mut it = 1000;
@@ -197,39 +374,38 @@ fn relax_vertices(mesh: &mut MeshData) {
             break;
         }
     }
-    info!("It: {}", it);
 }
 
-/*
-fn goldberg_dual_mesh(vertices: &VertexArray, triangles: &[Triangle]) -> (VertexArray, Vec<Triangle>) {
+fn goldberg_dual_mesh(mesh: &mut MeshData) {
     let binding = VertexArray::default();
     let mut new_vertices = HashedVertexArray::new(
         &binding,
         |id: &usize| {
+            let verts = &mesh.triangles.data[*id].verts;
             center_pos(&[
-                vertices.get(&triangles[*id].verts[0]),
-                vertices.get(&triangles[*id].verts[1]),
-                vertices.get(&triangles[*id].verts[2])
+                mesh.vertices.get(&verts[0]),
+                mesh.vertices.get(&verts[1]),
+                mesh.vertices.get(&verts[2])
                 ])
         }
     );
 
-    let mut triangle_fans: Vec<Triangle> = Vec::new();
-
     // Precalculate the adjacent triangles to each vertex in O(n)
-    let mut adjacent_triangles: Vec<Vec<usize>> = vec![Vec::new(); vertices.count()];
-    for (tr_idx, tr) in triangles.iter().enumerate() {
+    let mut adjacent_triangles: Vec<Vec<usize>> = vec![Vec::new(); mesh.vertices.count()];
+    for (tr_idx, tr) in mesh.triangles.data.iter().enumerate() {
         for i in tr.verts {
             adjacent_triangles[i.0].push(tr_idx);
         }
     }
 
+    let mut hexagons = PolygonArray::<6>::default();
+    let mut pentagons = PolygonArray::<5>::default();
+
     // For each vertex, create the surrounding hexagon (and 12 pentagons) as triangle fan
-    for i in 0..vertices.count() {
+    for (i, vertex) in mesh.vertices.inner().iter().enumerate() {
         // Center of hexagon face
-        let center_idx = VertexIndex(i);
         let adjacent_triangles = &adjacent_triangles[i];
-        let center = vertices.get(&center_idx);
+        let center = vertex;
 
         // Local orientation of hexagon face
         let normal = center.pos.normalize();
@@ -264,34 +440,94 @@ fn goldberg_dual_mesh(vertices: &VertexArray, triangles: &[Triangle]) -> (Vertex
             sorted_corner_vertices.push(new_vertices.get_vertex(&i));
         }
 
-        // Generate new center from corners, which is now guarenteed to form a flat face with the corners
-        let center_vertex = center_pos(&sorted_corner_vertices);
-        let center_idx = new_vertices.insert_unmapped(&center_vertex);
-
-        // Create the actual triangle fan
-        for (i, corner) in sorted_corners.iter().enumerate() {
-            let next_corner = sorted_corners[(i + 1) % sorted_corners.len()];
-
-            triangle_fans.push(
-                Triangle { verts: [
-                    center_idx,
-                    *corner,
-                    next_corner
-                ]}
-            );
+        // Create the face
+        if sorted_corners.len() == 6 {
+            hexagons.add(Hexagon { verts: [
+                sorted_corners[0],
+                sorted_corners[1],
+                sorted_corners[2],
+                sorted_corners[3],
+                sorted_corners[4],
+                sorted_corners[5],
+            ]});
+        } else if sorted_corners.len() == 5 {
+            pentagons.add(Pentagon { verts: [
+                sorted_corners[0],
+                sorted_corners[1],
+                sorted_corners[2],
+                sorted_corners[3],
+                sorted_corners[4],
+            ]});
+        } else {
+            panic!("Encountered face which is no pentagon or hexagon");
         }
     }
-    (new_vertices.retrieve_data(), triangle_fans)
+
+    mesh.vertices = new_vertices.retrieve_data();
+    mesh.normalize();
+    mesh.triangles = PolygonArray::default();
+    mesh.pents = pentagons;
+    mesh.hex = hexagons;
 }
 
-fn to_raw_indices(triangles: &[Triangle]) -> Vec<u32> {
-    let mut result: Vec<u32> = Vec::new();
-    for t in triangles {
-        for i in t.verts {
-            result.push(i.0 as u32);
-        }
+fn barycentric_projection<const N:usize> (
+    p: &mut Vec3,
+    origin: &[Vec3; N],
+    destination: &[Vec3; N]
+) {
+    let e1 = (origin[1] - origin[0]).normalize();
+    let normal = ((origin[1] - origin[0]).cross(origin[2] - origin[0])).normalize();
+    let e2 = normal.cross(e1);
+
+    let uv: Vec2 = Vec2 { x: p.dot(e1), y: p.dot(e2) };
+
+    let r: Vec<Vec2> =
+        origin.iter()
+            .map(|v| Vec2 {x: (*v - *p).dot(e1), y: (*v - *p).dot(e2)})
+            .collect();
+
+    let d: Vec<f32> =
+        r.iter()
+        .map(|r| r.length())
+        .collect();
+
+    let mut theta = vec![0.0; N];
+
+    for i in 0..N {
+        let j = (i + 1) % N;
+        theta[i] = r[i].angle_to(r[j]);
     }
-    result
+
+    let mut w = vec![0.0; N];
+
+    let eps = 0.00001;
+    for i in 0..N {
+        let prev = (i + N - 1) % N;
+
+        if d[i] < eps {
+            *p = destination[i];
+            return;
+        }
+
+        w[i] =
+            ((theta[prev] * 0.5).tan()
+            + (theta[i]    * 0.5).tan())
+            / d[i];
+    }
+
+    let sum: f32 = w.iter().sum();
+
+    for wi in &mut w {
+        *wi /= sum;
+    }
+
+    let mut warped = Vec3::ZERO;
+
+    for i in 0..N {
+        warped += destination[i] * w[i];
+    }
+
+    *p = warped;
 }
 
 fn icosahedron_indices() -> [Triangle; 20] {
@@ -343,5 +579,3 @@ fn icosahedron_vertices() -> [Vertex; 12] {
 
     vertices
 }
-
-    */

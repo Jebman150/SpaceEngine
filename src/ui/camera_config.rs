@@ -1,3 +1,5 @@
+use std::f32::consts::PI;
+
 use bevy::prelude::*;
 
 #[derive(Component)]
@@ -5,6 +7,7 @@ pub struct MainCamera {
     pub center: Vec3,
 
     pub orbital_rotation: Quat,
+    pub current_pitch: f32,
 
     pub dist: f32,
     pub min_dist: f32,
@@ -21,6 +24,7 @@ pub fn spawn_camera(
         MainCamera {
             center: Vec3::ZERO,
             orbital_rotation: Quat::IDENTITY,
+            current_pitch: 0.0,
             dist: 100.0,
             min_dist: 20.0,
             max_dist: 10000.0,

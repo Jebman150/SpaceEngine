@@ -51,6 +51,10 @@ impl VertexArray {
         &mut self.data
     }
 
+    pub fn inner(&self) -> &Vec<Vertex> {
+        &self.data
+    }
+
     pub fn update(&mut self, i: &VertexIndex, val: Vec3) {
         self.data[i.0].pos = val;
     }
@@ -139,7 +143,7 @@ pub struct Polygon<const N: usize> {
 pub type Line = Polygon<2>;
 pub type Triangle = Polygon<3>;
 pub type Quad = Polygon<4>;
-//pub type Pentagon = Polygon<5>;
+pub type Pentagon = Polygon<5>;
 pub type Hexagon = Polygon<6>;
 
 impl<const N: usize> Polygon<N> {
@@ -238,6 +242,7 @@ pub struct MeshData {
     pub lines: PolygonArray<2>,
     pub triangles: PolygonArray<3>,
     pub quads: PolygonArray<4>,
+    pub pents: PolygonArray<5>,
     pub hex: PolygonArray<6>,
 }
 
@@ -472,15 +477,36 @@ impl MeshData {
         self.triangles.append(new_triangles);
     }
 
+    pub fn normalize(&mut self) {
+        for v in self.vertices.ref_mut() {
+            v.pos = v.pos.normalize();
+        }
+    }
+
     pub fn reduce_to_triangles(&mut self) {
-        while self.quads.count() != 0 {
-            let verts = self.quads.data.last().expect("No quads?").verts;
+        while let Some(quad) = self.quads.data.pop() {
+            let verts = quad.verts;
             self.triangles.add(Triangle { verts: [verts[0], verts[1], verts[2]]});
             self.triangles.add(Triangle { verts: [verts[0], verts[2], verts[3]]});
-            self.quads.data.pop();
         }
-        while self.hex.count() != 0 {
-            let verts = self.hex.data.last().expect("No hexagons?").verts;
+        while let Some(pent) = self.pents.data.pop() {
+            let verts = pent.verts;
+            let mut vertices = Vec::new();
+            for i in verts {
+                vertices.push(self.vertices.get(&i));
+            }
+            let center = center_pos(&vertices);
+            self.vertices.add(center);
+            let center_idx = VertexIndex(self.vertices.count()-1);
+            self.triangles.add(Triangle { verts: [center_idx, verts[0], verts[1]]});
+            self.triangles.add(Triangle { verts: [center_idx, verts[1], verts[2]]});
+            self.triangles.add(Triangle { verts: [center_idx, verts[2], verts[3]]});
+
+            self.triangles.add(Triangle { verts: [center_idx, verts[3], verts[4]]});
+            self.triangles.add(Triangle { verts: [center_idx, verts[4], verts[0]]});
+        }
+        while let Some(hex) = self.hex.data.pop() {
+            let verts = hex.verts;
             let mut vertices = Vec::new();
             for i in verts {
                 vertices.push(self.vertices.get(&i));
@@ -495,44 +521,89 @@ impl MeshData {
             self.triangles.add(Triangle { verts: [center_idx, verts[3], verts[4]]});
             self.triangles.add(Triangle { verts: [center_idx, verts[4], verts[5]]});
             self.triangles.add(Triangle { verts: [center_idx, verts[5], verts[0]]});
-            self.hex.data.pop();
         }
     }
 
     pub fn reduce_to_lines(&mut self) {
-        while self.triangles.count() != 0 {
-            let verts = self.triangles.data.last().expect("No triangles?").verts;
+        while let Some(triangle) = self.triangles.data.pop() {
+            let verts = triangle.verts;
             self.lines.add(Line { verts: [verts[0], verts[1]] });
             self.lines.add(Line { verts: [verts[1], verts[2]] });
             self.lines.add(Line { verts: [verts[2], verts[0]] });
-            self.triangles.data.pop();
         }
-        while self.quads.count() != 0 {
-            let verts = self.quads.data.last().expect("No quads?").verts;
+        while let Some(quad) = self.quads.data.pop() {
+            let verts = quad.verts;
             self.lines.add(Line { verts: [verts[0], verts[1]] });
             self.lines.add(Line { verts: [verts[1], verts[2]] });
             self.lines.add(Line { verts: [verts[2], verts[3]] });
             self.lines.add(Line { verts: [verts[3], verts[0]] });
-            self.quads.data.pop();
+        }
+        while let Some(pent) = self.pents.data.pop() {
+            let verts = pent.verts;
+            self.lines.add(Line { verts: [verts[0], verts[1]] });
+            self.lines.add(Line { verts: [verts[1], verts[2]] });
+            self.lines.add(Line { verts: [verts[2], verts[3]] });
+            self.lines.add(Line { verts: [verts[3], verts[4]] });
+            self.lines.add(Line { verts: [verts[4], verts[0]] });
+        }
+        while let Some(hex) = self.hex.data.pop() {
+            let verts = hex.verts;
+            self.lines.add(Line { verts: [verts[0], verts[1]] });
+            self.lines.add(Line { verts: [verts[1], verts[2]] });
+            self.lines.add(Line { verts: [verts[2], verts[3]] });
+            self.lines.add(Line { verts: [verts[3], verts[4]] });
+            self.lines.add(Line { verts: [verts[4], verts[5]] });
+            self.lines.add(Line { verts: [verts[5], verts[0]] });
         }
     }
 
-    pub fn to_raw_triangles(&mut self) -> (Vec<[f32; 3]>, Vec<u32>) {
+    pub fn calc_lines_no_reduce(&mut self) {
+        for triangle in &self.triangles.data {
+            let verts = triangle.verts;
+            self.lines.add(Line { verts: [verts[0], verts[1]] });
+            self.lines.add(Line { verts: [verts[1], verts[2]] });
+            self.lines.add(Line { verts: [verts[2], verts[0]] });
+        }
+        for quad in &self.quads.data {
+            let verts = quad.verts;
+            self.lines.add(Line { verts: [verts[0], verts[1]] });
+            self.lines.add(Line { verts: [verts[1], verts[2]] });
+            self.lines.add(Line { verts: [verts[2], verts[3]] });
+            self.lines.add(Line { verts: [verts[3], verts[0]] });
+        }
+        for pent in &self.pents.data {
+            let verts = pent.verts;
+            self.lines.add(Line { verts: [verts[0], verts[1]] });
+            self.lines.add(Line { verts: [verts[1], verts[2]] });
+            self.lines.add(Line { verts: [verts[2], verts[3]] });
+            self.lines.add(Line { verts: [verts[3], verts[4]] });
+            self.lines.add(Line { verts: [verts[4], verts[0]] });
+        }
+        for hex in &self.hex.data {
+            let verts = hex.verts;
+            self.lines.add(Line { verts: [verts[0], verts[1]] });
+            self.lines.add(Line { verts: [verts[1], verts[2]] });
+            self.lines.add(Line { verts: [verts[2], verts[3]] });
+            self.lines.add(Line { verts: [verts[3], verts[4]] });
+            self.lines.add(Line { verts: [verts[4], verts[5]] });
+            self.lines.add(Line { verts: [verts[5], verts[0]] });
+        }
+    }
+
+    pub fn to_raw_triangles(&self) -> (Vec<[f32; 3]>, Vec<u32>) {
         (self.vertices.to_raw(), self.triangles.to_raw())
     }
 
-    pub fn to_raw_lines(&mut self) -> (Vec<[f32; 3]>, Vec<u32>) {
-        self.reduce_to_lines();
-        info!("Reduced to {} lines", self.lines.count());
+    pub fn to_raw_lines(&self) -> (Vec<[f32; 3]>, Vec<u32>) {
         (self.vertices.to_raw(), self.lines.to_raw())
     }
 
-    pub fn to_raw_flat_shading(&mut self) -> (Vec<[f32; 3]>, Vec<u32>) {
+    pub fn to_raw_flat_shading(&self) -> (Vec<[f32; 3]>, Vec<u32>) {
         self.vertices.to_raw_flat_shading(&self.triangles)
     }
 }
 
-fn center_pos(vertices: &[&Vertex]) -> Vertex {
+pub fn center_pos(vertices: &[&Vertex]) -> Vertex {
     let mut sum = Vec3::ZERO;
     for v in vertices {
         sum += v.pos;

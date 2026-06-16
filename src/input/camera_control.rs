@@ -1,3 +1,5 @@
+use std::f32::consts::PI;
+
 use bevy::{ecs::{message::MessageReader, system::Query}, input::mouse::{MouseMotion, MouseWheel}, prelude::*};
 
 use crate::{ui::{camera_config::MainCamera, sidebar::SelectedBody}, world::celestial::Celestial};
@@ -38,6 +40,13 @@ pub fn rotate(
         let yaw = Quat::from_axis_angle(up_axis, -delta.x * CAMERA_SENSITIVITY);
 
         cam.orbital_rotation = (yaw * pitch * cam.orbital_rotation).normalize();
+
+        cam.current_pitch -= delta.y * CAMERA_SENSITIVITY;
+        if cam.current_pitch > PI {
+            cam.current_pitch = -PI;
+        } else if cam.current_pitch < -PI {
+            cam.current_pitch = PI;
+        }
     }
 }
 
@@ -46,8 +55,6 @@ pub fn center_to_selected(
     bodies: Query<&Transform, (With<Celestial>, Without<MainCamera>)>,
     mut cam: Query<&mut MainCamera>
 ) {
-    
-
     let Ok(mut cam,) = cam.single_mut() else { return; };
 
     let Some(entity) = selected.0 else { cam.center = Vec3::ZERO; return; };
@@ -59,6 +66,7 @@ pub fn center_to_selected(
     }
 
     cam.orbital_rotation = Quat::IDENTITY;
+    cam.current_pitch = 0.0;
 }
 
 pub fn update(
@@ -72,7 +80,6 @@ pub fn update(
     *camera_transform = 
         camera_transform.looking_at(
             camera.center, 
-            Vec3::Y
+            if camera.current_pitch.abs() < PI/2.0 { Vec3::Y } else { -Vec3::Y }
         );
-    
 }

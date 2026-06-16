@@ -3,7 +3,7 @@ pub mod materials;
 
 use std::{f32::consts::PI, fs};
 
-use bevy::{asset::RenderAssetUsages, math::{U64Vec3, USizeVec2, ops::cbrt}, prelude::*, render::render_resource::{Extent3d, TextureDimension, TextureFormat}};
+use bevy::{asset::RenderAssetUsages, math::{U64Vec3, USizeVec2, ops::cbrt}, mesh::{Indices, MeshVertexAttribute}, prelude::*, render::render_resource::{Extent3d, TextureDimension, TextureFormat}};
 use noisy_bevy::simplex_noise_2d_seeded;
 use serde::Deserialize;
 
@@ -12,7 +12,7 @@ use crate::{
     world::{
         celestial::{
             Celestial, HeightMap, IntensityMap, Mass, Sun, ThermalBody, Velocity
-        }, chemistry::ChemicalComposition, generation::{materials::LineMaterial, mesh_generation::MeshDescriptor}, thermodynamics::HeatMap
+        }, chemistry::ChemicalComposition, generation::{materials::LineMaterial, mesh_generation::{RenderMode, RenderOptions}}, thermodynamics::HeatMap
     }
 };
 
@@ -96,7 +96,7 @@ pub fn spawn_planets(
     });
 
     let line_material = line_materials.add(LineMaterial {
-        color: LinearRgba::GREEN,
+        color: LinearRgba::BLACK,
     });
 
     for (id, planet_config) in config.planet.iter().enumerate() {
@@ -124,23 +124,42 @@ pub fn spawn_planets(
         // Mesh generation:
         let volume = calc_volume(planet_config.mass, &planet_config.chemical_composition, &periodic_table);
         let radius = cbrt(3.0*volume / (4.0 * PI));
-        let mesh = mesh_generation::generate_mesh(
-            MeshDescriptor{
-                radius: radius,
-                subdivisions: 4,
-                ..default()
-            }, &height_map);
-        //mesh.compute_normals();
+        let full_mesh = mesh_generation::generate_mesh(1);
 
+        let render_options = &RenderOptions {
+            scale: radius,
+            mode: RenderMode::Flat
+        };
 
+        let mut opaque_mesh = Mesh::new(bevy::mesh::PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0; 3]; 0])
+            .with_inserted_indices(Indices::U32(vec![]));
+        for i in 0..full_mesh.face_count {
+            opaque_mesh.merge(&full_mesh.get_single_face(i, &render_options))
+                .expect("Could not merge planet mesh");
+        }
+
+        let render_options = &RenderOptions {
+            scale: radius+0.1,
+            mode: RenderMode::Frame
+        };
+
+        let mut grid_mesh = Mesh::new(bevy::mesh::PrimitiveTopology::LineList, RenderAssetUsages::RENDER_WORLD)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0; 3]; 0])
+            .with_inserted_indices(Indices::U32(vec![]));
+        for i in 0..full_mesh.face_count {
+            grid_mesh.merge(&full_mesh.get_single_face(i, &render_options))
+                .expect("Could not merge planet mesh");
+        }
         
         let color = get_average_color(&planet_config.chemical_composition, &periodic_table);
         let heat_capacity = calc_heat_capacity(&planet_config.chemical_composition, &periodic_table);
 
-        let mesh_handle: Handle<Mesh> = meshes.add(mesh);
+        let opaque_mesh_handle: Handle<Mesh> = meshes.add(opaque_mesh);
+        let grid_mesh_handle: Handle<Mesh> = meshes.add(grid_mesh);
 
-        let planet_material = line_material.clone();
-        /*if let Some(color) = color {
+        let planet_material =
+        if let Some(color) = color {
             materials.add(StandardMaterial {
                 base_color_texture: Some(images.add(colored_texture(color))),
                 unlit: false,
@@ -151,7 +170,7 @@ pub fn spawn_planets(
         } else {
             warn!("Could not create material for planet {} - using debug material", id);
             debug_material.clone()
-        };*/
+        };
 
         if planet_config.fixed {
             commands.spawn((
@@ -167,8 +186,13 @@ pub fn spawn_planets(
                 HeightMap(height_map),
 
                 planet_config.chemical_composition.clone(),
-                Mesh3d(mesh_handle),
+                Visibility::default()
+            )).with_child((
+                Mesh3d(opaque_mesh_handle),
                 MeshMaterial3d(planet_material)
+            )).with_child((
+                Mesh3d(grid_mesh_handle),
+                MeshMaterial3d(line_material.clone())
             ));
         } else {
             commands.spawn((
@@ -183,9 +207,14 @@ pub fn spawn_planets(
                 HeightMap(height_map),
 
                 planet_config.chemical_composition.clone(),
-                Mesh3d(mesh_handle),
+                Visibility::default()
+            )).with_child((
+                Mesh3d(opaque_mesh_handle),
                 MeshMaterial3d(planet_material)
-            ));
+            )).with_child((
+                Mesh3d(grid_mesh_handle),
+                MeshMaterial3d(line_material.clone())
+            ));;
         }
     }
 }
